@@ -1,66 +1,154 @@
 import re
 import sys
-import time
 from datetime import datetime
 from os import listdir, path
+from time import sleep
 
-import pandas as pd
 
+class DataFrame:
+    def __init__(self, columns: list = None, rows: list = None):
+        self.columns = columns
+        self.rows = rows
 
-def get_section_table(lista, title_key, title, table_key) -> pd.DataFrame:
+    columns = None
+    rows = None
 
-    temp = (
-        None
-        if [p for p in lista if p.get(title_key) == title] is None
-        else [p for p in lista if p.get(title_key) == title][0]
-    )
+    def to_md(self, nl="") -> str:
 
-    if temp is None:
+        md_text = ""
+        if self.columns in [None, []]:
+            return md_text
+
+        # Titulos
+        md_text += f"|{'|'.join(self.columns)}|\n"
+        md_text += f"|{'|'.join(['---' for _ in self.columns])}|\n"
+
+        if self.rows not in [None, []]:
+            lines = [[DataFrame.__remove_tags(c) for c in l] for l in self.rows]
+            md_text += "\n".join([f"|{'|'.join(r)}|" for r in lines])
+
+        return md_text + nl
+
+    def to_html(self) -> str:
+
+        md_text = "<table>\n"
+        if self.columns in [None, []]:
+            return md_text
+
+        # Titulos
+        md_text += (
+            f"<thead>\n<tr><th>{'</th><th>'.join(self.columns)}</th></tr>\n</thead>\n"
+        )
+
+        if self.rows not in [None, []]:
+            md_text += "<tbody>\n"
+
+            md_text += "\n".join(
+                [f"<tr><td>{'</td><td>'.join(r)}</td></tr>" for r in self.rows]
+            )
+            md_text += "\n</tbody>\n"
+
+        md_text += "</table>"
+
+        return md_text
+
+    @staticmethod
+    def from_html(html_table: str):
+        tabelas = DataFrame.__get_tables(html_table)
+        if tabelas is None:
+            return DataFrame()
+        else:
+            if len(tabelas) == 1:
+                tabela = tabelas[0]
+                columns, rows = DataFrame.__get_one_table(tabela)
+                return DataFrame(columns=columns, rows=rows)
+            else:
+
+                dfs = []
+
+                for t in tabelas:
+                    columns, rows = DataFrame.__get_one_table(t)
+                    df = DataFrame(columns, rows)
+                    dfs.append(df)
+
+                return dfs
+
+    @staticmethod
+    def __get_tables(html: str):
+        html = DataFrame.__remove_tabs_ans_newlines(html)
+        tables = [
+            (t[t.find("<table") :] + "</table>")
+            .replace("<tr >", "<tr>")
+            .replace("<th >", "<th>")
+            .replace("<td >", "<td>")
+            .replace("th>", "td>")
+            for t in html.split("</table>")
+        ]
+        if tables:
+            return tables[:-1]
         return None
 
-    return temp.get(table_key)
+    @staticmethod
+    def __get_one_table(html_table):
+        linhas = [
+            l[l.find("<tr>") + 4 :].replace("\n", "") for l in html_table.split("</tr>")
+        ][:-1]
+        columns = None
+        rows = None
+
+        if len(linhas) > 0:
+            columns = [
+                t.replace("<td>", "").replace("</td>", "")
+                for t in linhas[0].split("</td><td>")
+            ]
+
+        if len(linhas) > 1:
+            rows = [
+                [
+                    DataFrame.__remove_tags(l.replace("<td>", "").replace("</td>", ""))
+                    for l in t.split("</td><td>")
+                ]
+                for t in linhas[1:]
+            ]
+
+        return columns, rows
+
+    @staticmethod
+    def __remove_tags(text: str) -> str:
+        return re.sub(r'<(?:"[^"]*"[\'"]*|\'[^\']*\'[\'"]*|[^\'">])+>', "", text)
+
+    @staticmethod
+    def __remove_tabs_ans_newlines(text: str) -> str:
+        return text.replace("\n", "").replace("\t", "")
 
 
-def get_multiple_tables_in(list, title_key, table_key, prefix, new_prefix) -> list:
+def create_base_etl_doc(df) -> str:
 
-    new_list = [c for c in list if c.get(title_key).startswith(prefix)]
+    columns = ["Name", "Description"]
+    indexes = [0, 1]
+    tabelas = [
+        dict(zip(columns, [c for i, c in enumerate(l) if i in indexes]))
+        for l in df.rows
+    ]
 
-    if len(new_list) > 0:
-        return [
-            {
-                title_key: f"{new_prefix}{c.get(title_key).replace(prefix, '')[:-1]}",
-                table_key: c.get(table_key),
-            }
-            for c in new_list
-        ]
+    texto = ""
 
-    return None
-
-
-def convert_to_md_table(df: pd.DataFrame) -> str:
-    colunas = df.columns.tolist()
-
-    texto = f"|{'|'.join(colunas)}|\n"
-    texto += f"|{'|'.join(['---' for _ in range(len(colunas))])}|\n"
-
-    for col in colunas:
-        df[col] = df[col].fillna("")
-
-    for _, l in df.iterrows():
-
-        texto += f"|{'|'.join([str(l[c]) for c in colunas])}|\n"
-
-    return texto
-
-
-def create_base_etl_doc(df: pd.DataFrame) -> str:
-
-    dados = df[["Name", "Description"]].to_dict("records")
     texto = "\n\n".join(
-        [f"**[`{t.get('Name')}`](dummy_link):** {t.get('Description')}" for t in dados]
+        [
+            f"**[`{t.get('Name')}`](dummy_link):** {t.get('Description')}"
+            for t in tabelas
+        ]
     )
-    texto = texto + "\n\n"
-    return texto
+    return texto + "\n\n"
+
+
+def md_title(text: str, level: int = 1, nl=""):
+    if not str(level).isnumeric():
+        level = 1
+    level = 1 if level < 1 else level
+    level = 7 if level > 7 else level
+
+    return "".join(["#" for _ in range(level)]) + " " + text + nl
 
 
 def create_doc(base_file, dest_file_path):
@@ -110,46 +198,34 @@ def create_doc(base_file, dest_file_path):
     initial = []
 
     for p in parts_table:
+
+        # Pego todos os títulos encontrados para poder agrupar algum caso necessario
         find_title = re.findall(
             r"(<h1>|<h2>|<h3>)+<div>(.*?)<\/div>+(<\/h1>|<\/h2>|<\/h3>)", p
         )
-        find_table = re.search(r"<table[\s\S]*<\/table>", p)
 
-        if find_title:
+        if find_title is not None:
 
             if str(find_title[0][1]).startswith("Visuals in "):
-                for tab in [f"{t}</table>" for t in p.split("</table>")]:
-                    find_title = re.findall(
+
+                title = "Visuals"
+
+                visuals_in = {}
+
+                for subtab in [f"{t}</table>" for t in p.split("</table>")]:
+                    subtitle = re.findall(
                         r"(<h1>|<h2>|<h3>)+<div>(.*?)<\/div>+(<\/h1>|<\/h2>|<\/h3>)",
-                        tab,
+                        subtab,
                     )
-                    find_table = re.search(r"<table[\s\S]*<\/table>", tab)
 
-                    if find_table:
-                        title = find_title[0][1]
-                        table = find_table[0] if find_table else None
-
-                        table_df = pd.read_html(table)[0] if table else None
-
-                        if len(table_df) > 0:
-
-                            table_df.columns = table_df.iloc[0]
-                            table_df = table_df.iloc[1:].copy().reset_index(drop=True)
-
-                        initial.append({"title": title, "table": table_df})
+                    if subtitle:
+                        title = subtitle[0][1]
+                        table = DataFrame.from_html(subtab)
+                        initial.append({"title": title, "table": table})
             else:
-
                 title = find_title[0][1]
-                table = find_table[0] if find_table else None
-
-                table_df = pd.read_html(table)[0] if table else None
-
-                if len(table_df) > 0:
-
-                    table_df.columns = table_df.iloc[0]
-                    table_df = table_df.iloc[1:].copy().reset_index(drop=True)
-
-                initial.append({"title": title, "table": table_df})
+                table = DataFrame.from_html(p)
+                initial.append({"title": title, "table": table})
 
     # Separar as partes:
     # List of pages (tabela única)
@@ -161,31 +237,26 @@ def create_doc(base_file, dest_file_path):
         else [p for p in initial if p.get("title") == nome][0]
     )
 
-    documentation["page_list"] = get_section_table(
-        initial, "title", "List of Pages:", "table"
-    )
+    tables = {t.get("title"): t.get("table") for t in initial}
+
+    documentation["page_list"] = tables.get("List of Pages:")
 
     # Visuals in <Page> (uma tabela por página)
-    documentation["visuals_per_page"] = get_multiple_tables_in(
-        initial, "title", "table", "Visuals in ", "Visuais em "
-    )
+    documentation["visuals_per_page"] = [
+        t for t in initial if str(t.get("title")).startswith("Visuals in")
+    ]
 
     # List of all Columns/Fields/Measures/Expressions Used in Visuals: (única)
-    documentation["columns_fields_measures_expressions"] = get_section_table(
-        initial,
-        "title",
-        "List of all Columns/Fields/Measures/Expressions Used in Visuals:",
-        "table",
+    documentation["columns_fields_measures_expressions"] = tables.get(
+        "List of all Columns/Fields/Measures/Expressions Used in Visuals:"
     )
 
     # List of Tables Used in Visuals: (única)
-    documentation["tables_used"] = get_section_table(
-        initial, "title", "List of Tables Used in Visuals:", "table"
-    )
+    documentation["tables_used"] = tables.get("List of Tables Used in Visuals:")
 
     # List of Columns Not Used in Visuals: Única
-    documentation["columns_not_used"] = get_section_table(
-        initial, "title", "List of Columns Not Used in Visuals:", "table"
+    documentation["columns_not_used"] = tables.get(
+        "List of Columns Not Used in Visuals:"
     )
 
     # partes Finais
@@ -201,23 +272,16 @@ def create_doc(base_file, dest_file_path):
     final_tables = []
 
     for p in parts_table:
+
+        # Pego todos os títulos encontrados para poder agrupar algum caso necessario
         find_title = re.findall(
             r"(<h1>|<h2>|<h3>)+<div>(.*?)<\/div>+(<\/h1>|<\/h2>|<\/h3>)", p
         )
-        find_table = re.search(r"<table[\s\S]*<\/table>", p)
 
-        if find_title:
+        if find_title is not None:
             title = find_title[0][1]
-            table = find_table[0] if find_table else None
-
-            table_df = pd.read_html(table)[0] if table else None
-
-            if table_df is not None:
-                if len(table_df) > 0:
-                    table_df.columns = table_df.iloc[0]
-                    table_df = table_df.iloc[1:].copy().reset_index(drop=True)
-
-            final_tables.append({"title": title, "table": table_df})
+            table = DataFrame.from_html(p)
+            final_tables.append({"title": title, "table": table})
 
     # Scripts
 
@@ -248,128 +312,143 @@ def create_doc(base_file, dest_file_path):
 
         power_query.append({"title": title, "code": code})
 
-        # List of Tables: - única
-    documentation["tables_list"] = get_section_table(
-        final_tables, "title", "List of Tables:", "table"
-    )
+    tabelas = {
+        t.get("title"): t.get("table")
+        for t in final_tables
+        if not t.get("title", "").startswith("List of Columns for Table ")
+    }
+
+    list_of_table_columns = [
+        t
+        for t in [
+            t
+            for t in final_tables
+            if t.get("title", "").startswith("List of Columns for Table ")
+        ]
+    ]
+
+    # List of Tables: - única
+    documentation["tables_list"] = tabelas.get("List of Tables:")
 
     # List of Measures: - única
-    documentation["measures_list"] = get_section_table(
-        final_tables, "title", "List of Measures:", "table"
-    )
+    documentation["measures_list"] = tabelas.get("List of Measures:")
 
     # List of Columns for Table <table>: - Uma por tabela
-    documentation["columns_in_tables"] = get_multiple_tables_in(
-        final_tables,
-        "title",
-        "table",
-        "List of Columns for Table ",
-        "Lista de colunas na tabela ",
-    )
+    documentation["columns_in_tables"] = list_of_table_columns
 
     # List of Roles:única
-    documentation["roles"] = get_section_table(
-        final_tables, "title", "List of Roles:", "table"
-    )
+    documentation["roles"] = tabelas.get("List of Roles:")
 
     # Relationships: única
-    documentation["relashionship"] = get_section_table(
-        final_tables, "title", "Relationships:", "table"
-    )
+    documentation["relashionship"] = tabelas.get("Relationships:")
+
+    documentation["partitions"] = tabelas.get("Partitions:")
 
     documentation["power_queries"] = power_query
 
-    # Criar Documento
-    file = f"{dest_file_path}\\{documentation.get('file_name')}.md"
+    file = f"{filePath}\\{documentation.get('file_name')}.md"
 
     with open(file, "w", encoding="utf-8") as f:
-        f.write(f"# Documentação Power BI - {documentation.get('file_name')}\n")
+        f.write(
+            md_title(
+                f"Documentação Power BI - {documentation.get('file_name')}", nl="\n"
+            )
+        )
+
         f.write(f"**Data:** *{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}*\n\n")
 
         f.write(f"**Nome do arquivo:** *{documentation.get('full_file_name')}*\n\n")
+
         f.write(f"**Caminho do arquivo .pbix:** *{documentation.get('file_path')}*\n\n")
 
         f.write(f"---\n\n")
 
-        f.write(f"## Lista de páginas:\n\n")
+        f.write(md_title("Lista de páginas:", 2, "\n\n"))
 
-        f.write(convert_to_md_table(documentation.get("page_list")))
+        f.write(documentation.get("page_list").to_md("\n\n"))
 
         f.write(f"---\n\n")
 
-        f.write(f"## Lista de visuais por relatório:\n\n")
+        f.write(md_title("Lista de visuais por relatório:", 2, "\n\n"))
 
         for v in documentation.get("visuals_per_page"):
-            f.write(f"### {v.get('title')}:\n\n")
-            f.write(convert_to_md_table(v.get("table")))
+            f.write(md_title(v.get("title"), 3, "\n\n"))
+            f.write(v.get("table").to_md("\n\n"))
+            f.write("\n\n")
 
         f.write(f"---\n\n")
 
         f.write(
-            f"## Lista de todas as Colunas/Campos/Medidas/Expressões usadas nos visuais:\n\n"
-        )
-
-        f.write(
-            convert_to_md_table(
-                documentation.get("columns_fields_measures_expressions")
+            md_title(
+                "Lista de todas as Colunas/Campos/Medidas/Expressões usadas nos visuais:",
+                2,
+                "\n\n",
             )
         )
 
-        f.write(f"---\n\n")
-
-        f.write(f"## Lista das Tabelas usadas nos visuais:\n\n")
-
-        f.write(convert_to_md_table(documentation.get("tables_used")))
+        f.write(documentation.get("columns_fields_measures_expressions").to_md("\n\n"))
 
         f.write(f"---\n\n")
 
-        f.write(f"## Lista das Colunas NÃO usadas nos visuais:\n\n")
+        f.write(md_title("Lista das Tabelas usadas nos visuais:", 2, "\n\n"))
 
-        f.write(convert_to_md_table(documentation.get("columns_not_used")))
-
-        f.write(f"---\n\n")
-
-        f.write(f"## Modelo:\n\n")
-
-        f.write(f"## Modelo: {documentation.get('model_name')}\n\n")
+        f.write(documentation.get("tables_used").to_md("\n\n"))
 
         f.write(f"---\n\n")
 
-        f.write(f"## Lista de Tabelas:\n\n")
+        f.write(md_title("Lista das Colunas NÃO usadas nos visuais:", 2, "\n\n"))
 
-        f.write(convert_to_md_table(documentation.get("tables_list")))
+        f.write(documentation.get("columns_not_used").to_md("\n\n"))
 
         f.write(f"---\n\n")
 
-        f.write(f"## Arquivos de ETL:\n\n")
+        f.write(md_title("Modelo:", 2, "\n\n"))
+
+        f.write(md_title(f"Modelo: {documentation.get('model_name')}", 2, "\n\n"))
+
+        f.write(f"---\n\n")
+
+        f.write(md_title("Lista de Tabelas:", 2, "\n\n"))
+
+        f.write(documentation.get("tables_list").to_md("\n\n"))
+
+        f.write(f"---\n\n")
+
+        f.write(md_title("Arquivos de ETL:", 2, "\n\n"))
 
         f.write(create_base_etl_doc(documentation.get("tables_list")))
 
         f.write(f"---\n\n")
 
-        f.write(f"## Lista de Medidas:\n\n")
+        f.write(md_title("Lista de Medidas:", 2, "\n\n"))
 
-        f.write(convert_to_md_table(documentation.get("measures_list")))
+        f.write(documentation.get("measures_list").to_md("\n\n"))
 
         f.write(f"---\n\n")
 
-        f.write(f"## Lista de Colunas por tabela:\n\n")
+        f.write(md_title("Lista de Colunas por Tabela:", 2, "\n\n"))
 
         for v in documentation.get("columns_in_tables"):
-            f.write(f"### {v.get('title')}:\n\n")
-            f.write(convert_to_md_table(v.get("table")))
+            f.write(md_title(v.get("title"), 3, ":\n\n"))
+            f.write(v.get("table").to_md("\n\n"))
 
         f.write(f"---\n\n")
 
-        f.write(f"## Lista de Funções (Roles):\n\n")
+        f.write(md_title("Lista de Funções (Segurança):", 2, "\n\n"))
 
-        f.write(convert_to_md_table(documentation.get("roles")))
+        f.write(documentation.get("roles").to_md("\n\n"))
 
         f.write(f"---\n\n")
 
-        f.write(f"## Lista de Relacionamentos:\n\n")
+        f.write(md_title("Lista de Relacionamentos:", 2, "\n\n"))
 
-        f.write(convert_to_md_table(documentation.get("relashionship")))
+        f.write(documentation.get("relashionship").to_md("\n\n"))
+
+        f.write(f"---\n\n")
+
+        f.write(md_title("Lista de Partições:", 2, "\n\n"))
+
+        f.write(documentation.get("partitions").to_md("\n\n"))
 
         f.write(f"---\n\n")
 
@@ -381,7 +460,6 @@ def create_doc(base_file, dest_file_path):
             f.write(f">{code}\n\n")
 
 
-# print("\\".join(" ".join(sys.argv[1:])).split("\\")[:-1])
 path = " ".join(sys.argv[1:])
 filePath = "\\".join(path.split("\\")[:-1])
 
@@ -396,4 +474,10 @@ for f in arquivos:
     arquivo = arquivos[0]
     arquivo = f"{filePath}\\{arquivo}"
 
-    create_doc(f, filePath)
+    try:
+        create_doc(f, filePath)
+    except Exception as ex:
+        print(ex)
+        sleep(5)
+        with open(filePath, "w") as f:
+            f.write(f"# Erro ao criar Documentação.\n\n## Erro Python: {ex}")
